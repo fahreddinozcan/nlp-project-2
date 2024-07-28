@@ -52,15 +52,19 @@ def sample_data(en_sentences, fr_sentences, sample_ratio=0.1):
     indices = random.sample(range(len(en_sentences)), sample_size)
     return [en_sentences[i] for i in indices], [fr_sentences[i] for i in indices]
 
-def preprocess(sentences):
-    processed = []
-    for sent in sentences:
+def preprocess(src_sentences, tgt_sentences):
+    src_processed = []
+    tgt_processed = []
+    for src_sent, tgt_sent in zip(src_sentences, tgt_sentences):
         # Lowercase the text
-        sent = sent.lower()
+        src_sent = src_sent.lower()
+        tgt_sent = tgt_sent.lower()
         # Remove lines with XML tags
-        if not sent.startswith('<'):
+        if not src_sent.startswith('<') and not tgt_sent.startswith('<'):
             # Strip whitespace
-            sent = sent.strip()
-            if sent:  # Ensure the sentence is not empty
-                processed.append(sent)
-    return processed
+            src_sent = src_sent.strip()
+            tgt_sent = tgt_sent.strip()
+            if src_sent and tgt_sent:  # Ensure the sentences are not empty
+                src_processed.append(src_sent)
+                tgt_processed.append(tgt_sent)
+    return src_processed, tgt_processed

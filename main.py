@@ -6,15 +6,21 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-from sklearn.model_selection import train_test_split
 from nltk.translate.bleu_score import corpus_bleu
-from torchtext.data.metrics import bleu_score
+# from torchtext.data.metrics import bleu_score
 import matplotlib.pyplot as plt
 import numpy as np
+from Seq2Seq import Encoder, Decoder, Seq2Seq
+
+# Define hyperparameters
+embedding_size = 300
+hidden_size = 1024
+num_layers = 2
+learning_rate = 0.001
+batch_size = 64
+num_epochs = 20
+    
+
 class Vocabulary:
     def __init__(self, lang):
         self.word2index = {"<PAD>": 0, "<SOS>": 1, "<EOS>": 2, "<UNK>": 3}
@@ -47,58 +53,21 @@ class TranslationDataset(Dataset):
     def __getitem__(self, idx):
         return self.src_data[idx], self.tgt_data[idx]
 
-# Seq2Seq model
-class Encoder(nn.Module):
-    def __init__(self, input_size, embedding_size, hidden_size, num_layers):
-        super(Encoder, self).__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.embedding = nn.Embedding(input_size, embedding_size)
-        self.rnn = nn.LSTM(embedding_size, hidden_size, num_layers, batch_first=True)
-
-    def forward(self, x):
-        embedded = self.embedding(x)
-        outputs, (hidden, cell) = self.rnn(embedded)
-        return hidden, cell
-
-class Decoder(nn.Module):
-    def __init__(self, input_size, embedding_size, hidden_size, output_size, num_layers):
-        super(Decoder, self).__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.embedding = nn.Embedding(input_size, embedding_size)
-        self.rnn = nn.LSTM(embedding_size, hidden_size, num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size, output_size)
-
-    def forward(self, x, hidden, cell):
-        x = x.unsqueeze(1)
-        embedded = self.embedding(x)
-        outputs, (hidden, cell) = self.rnn(embedded, (hidden, cell))
-        predictions = self.fc(outputs.squeeze(1))
-        return predictions, hidden, cell
-
-class Seq2Seq(nn.Module):
-    def __init__(self, encoder, decoder):
-        super(Seq2Seq, self).__init__()
-        self.encoder = encoder
-        self.decoder = decoder
-
-    def forward(self, source, target, teacher_force_ratio=0.5):
-        batch_size = source.shape[0]
-        target_len = target.shape[1]
-        target_vocab_size = self.decoder.fc.out_features
-
-        outputs = torch.zeros(batch_size, target_len, target_vocab_size).to(device)
-        hidden, cell = self.encoder(source)
-
-        x = target[:, 0]
-        for t in range(1, target_len):
-            output, hidden, cell = self.decoder(x, hidden, cell)
-            outputs[:, t] = output
-            best_guess = output.argmax(1)
-            x = target[:, t] if torch.rand(1).item() < teacher_force_ratio else best_guess
-
-        return outputs
+def prepare_data(texts, vocab, max_len):
+        # First pad the text data
+        for i in range(len(texts)):
+            sentence = texts[i]
+            words = sentence.split()
+            while len(words) < max_len:
+                words.append('<PAD>')
+            sentence = ' '.join(words)
+            texts[i] = sentence
+    
+        sequences = [[vocab.word2index.get(word, vocab.word2index['<UNK>']) for word in text.split()] for text in texts]
+     
+        return torch.LongTensor(sequences)
+def pad_sequences(sequences, max_len):
+        return [seq + ['<PAD>'] * (max_len - len(seq)) for seq in sequences]
 
 if __name__ == "__main__":
     en_file = './fr-en/europarl-v7.fr-en.en'
@@ -108,16 +77,15 @@ if __name__ == "__main__":
     en_sentences = read_file(en_file)
     fr_sentences = read_file(fr_file)
     
-    print("Analyzing data...")
-    analyze_data(en_sentences, fr_sentences)
+    # print("Analyzing data...")
+    # analyze_data(en_sentences, fr_sentences)
     
     print("Sampling data...")
     en_sample, fr_sample = sample_data(en_sentences, fr_sentences)
     
     print("Pre-processing data...")
-    en_processed = preprocess(en_sample)
-    fr_processed = preprocess(fr_sample)
-    
+    en_processed , fr_processed = preprocess(en_sample, fr_sample)
+
     print(f"Original sample size: {len(en_sample)}")
     print(f"Processed sample size: {len(en_processed)}")
     
@@ -129,8 +97,8 @@ if __name__ == "__main__":
     
     print("Processed data saved to en_processed.txt and fr_processed.txt")
     
-    en_data = load_data('processed_en.txt')
-    fr_data = load_data('processed_fr.txt')
+    en_data = load_data('en_processed.txt')
+    fr_data = load_data('fr_processed.txt')
     
     train_en, test_en, train_fr, test_fr = train_test_split(en_data, fr_data, test_size=0.2, random_state=42)
     train_en, val_en, train_fr, val_fr = train_test_split(train_en, train_fr, test_size=0.1, random_state=42)
@@ -143,28 +111,16 @@ if __name__ == "__main__":
     for sentence in train_fr:
         fr_vocab.add_sentence(sentence)
         
-    def pad_sequences(sequences, max_len):
-        return [seq + ['<PAD>'] * (max_len - len(seq)) for seq in sequences]
-
+   
     max_len_en = max(len(seq.split()) for seq in en_data)
     max_len_fr = max(len(seq.split()) for seq in fr_data)
     
-    def prepare_data(texts, vocab, max_len):
-        sequences = [[vocab.word2index.get(word, vocab.word2index['<UNK>']) for word in text.split()] for text in texts]
-        sequences = pad_sequences(sequences, max_len)
-        return torch.LongTensor(sequences)
     
     input_size_en = en_vocab.n_words
     input_size_fr = fr_vocab.n_words
     output_size_en = en_vocab.n_words
     output_size_fr = fr_vocab.n_words
-    embedding_size = 300
-    hidden_size = 1024
-    num_layers = 2
-    learning_rate = 0.001
-    batch_size = 64
-    num_epochs = 20
-    
+   
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -260,7 +216,7 @@ if __name__ == "__main__":
                     pred = [vocab.index2word[idx.item()] for idx in output[i] if idx.item() not in [0, 1, 2]]
                     targets.append([target])
                     outputs.append(pred)
-        return bleu_score(outputs, targets)
+        return corpus_bleu(outputs, targets)
     
     model.load_state_dict(torch.load('best_model.pt'))
     test_loss = evaluate(model, test_loader, criterion)
@@ -402,7 +358,7 @@ if __name__ == "__main__":
                     pred = ''.join([vocab.index2char[idx.item()] for idx in output[i] if idx.item() not in [0, 1, 2]])
                     targets.append([target])
                     outputs.append(pred)
-        return bleu_score(outputs, targets)
+        return corpus_bleu(outputs, targets)
 
     # Evaluate character-based model on test set
     char_model.load_state_dict(torch.load('best_char_model.pt'))
@@ -437,7 +393,7 @@ if __name__ == "__main__":
                         pred = [vocab.index2word[idx.item()] for idx in output[i] if idx.item() not in [0, 1, 2]]
                     
                     length = len(target) if is_char_based else len(target.split())
-                    bleu = bleu_score([pred], [[target]])
+                    bleu = corpus_bleu([pred], [[target]])
                     
                     if length not in length_bleu:
                         length_bleu[length] = []
